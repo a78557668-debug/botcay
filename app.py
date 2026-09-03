@@ -25,7 +25,7 @@ DB_NAME = os.path.join(BASE_DIR, "helper_bot.db")
 app = Flask(__name__)
 @app.route('/')
 def home():
-    return "Ludyvon OSINT PRO"
+    return "OSINT Pro"
 @app.route('/health')
 def health():
     return "OK", 200
@@ -50,12 +50,11 @@ class Database:
             last_name TEXT,
             language TEXT DEFAULT 'ru',
             theme TEXT DEFAULT 'hacker',
-            bot_mode TEXT DEFAULT 'key_helper',
             is_dev INTEGER DEFAULT 0,
             is_banned INTEGER DEFAULT 0,
             is_vip INTEGER DEFAULT 0,
             vip_until TEXT,
-            requests_balance INTEGER DEFAULT 0,
+            requests_balance INTEGER DEFAULT 5,
             dev_attempts INTEGER DEFAULT 0,
             dev_blocked_until TEXT,
             registered_at TIMESTAMP,
@@ -69,7 +68,7 @@ class Database:
         conn.commit(); conn.close()
     def get_requests_balance(self, user_id):
         conn = self.get_connection(); cursor = conn.cursor(); cursor.execute('SELECT requests_balance FROM users WHERE user_id = ?', (user_id,)); result = cursor.fetchone(); conn.close()
-        return result[0] if result else 0
+        return result[0] if result else 5
     def add_requests(self, user_id, count):
         conn = self.get_connection(); cursor = conn.cursor()
         cursor.execute('UPDATE users SET requests_balance = requests_balance + ? WHERE user_id = ?', (count, user_id))
@@ -94,6 +93,16 @@ class Database:
         else:
             cursor.execute('UPDATE users SET is_vip = ?, vip_until = NULL WHERE user_id = ?', (status, user_id))
         conn.commit(); conn.close()
+    def get_language(self, user_id):
+        conn = self.get_connection(); cursor = conn.cursor(); cursor.execute('SELECT language FROM users WHERE user_id = ?', (user_id,)); result = cursor.fetchone(); conn.close()
+        return result[0] if result else 'ru'
+    def update_language(self, user_id, language):
+        conn = self.get_connection(); cursor = conn.cursor(); cursor.execute('UPDATE users SET language = ? WHERE user_id = ?', (language, user_id)); conn.commit(); conn.close()
+    def get_theme(self, user_id):
+        conn = self.get_connection(); cursor = conn.cursor(); cursor.execute('SELECT theme FROM users WHERE user_id = ?', (user_id,)); result = cursor.fetchone(); conn.close()
+        return result[0] if result else 'hacker'
+    def update_theme(self, user_id, theme):
+        conn = self.get_connection(); cursor = conn.cursor(); cursor.execute('UPDATE users SET theme = ? WHERE user_id = ?', (theme, user_id)); conn.commit(); conn.close()
     def is_dev(self, user_id):
         conn = self.get_connection(); cursor = conn.cursor(); cursor.execute('SELECT is_dev FROM users WHERE user_id = ?', (user_id,)); result = cursor.fetchone(); conn.close()
         return result and result[0] == 1
@@ -231,7 +240,6 @@ def get_dev_menu():
 def get_settings_menu():
     return ReplyKeyboardMarkup([
         [KeyboardButton("🌐 ЯЗЫК"), KeyboardButton("🎨 ТЕМА")],
-        [KeyboardButton("📌 СМЕНИТЬ РЕЖИМ")],
         [KeyboardButton("👨‍💻 РЕЖИМ РАЗРАБОТЧИКА")],
         [KeyboardButton("🔙 НАЗАД")]
     ], resize_keyboard=True)
@@ -249,7 +257,7 @@ async def start(update, context):
     username = update.effective_user.username or ""
     first_name = update.effective_user.first_name or "User"
     db.add_user(user_id, username, first_name, "")
-    await update.message.reply_text("🔥 LUDYVON OSINT PRO\n═══════════════════\n\n⚡ СИСТЕМА: ONLINE\n📌 Баланс запросов: X\n\nВыберите операцию:", parse_mode=ParseMode.MARKDOWN, reply_markup=get_main_menu(user_id))
+    await update.message.reply_text("🔥 OSINT PRO\n═══════════════════\n\n⚡ СИСТЕМА: ONLINE\n📌 Бесплатных запросов: 5\n\nВыберите операцию:", parse_mode=ParseMode.MARKDOWN, reply_markup=get_main_menu(user_id))
 
 async def buy(update, context):
     await update.message.reply_text("⚡ Выберите тариф:", reply_markup=get_payment_menu())
@@ -259,7 +267,7 @@ async def handle_message(update, context):
     user_id = update.effective_user.id
     text = update.message.text
 
-    # ВВОД ПАРОЛЯ (1 РАЗ)
+    # ВВОД ПАРОЛЯ
     if text == DEV_PASSWORD:
         if db.get_dev_blocked_until(user_id):
             blocked_until = datetime.strptime(db.get_dev_blocked_until(user_id), '%Y-%m-%d %H:%M:%S')
@@ -272,7 +280,15 @@ async def handle_message(update, context):
         await update.message.reply_text("✅ *DEV MODE АКТИВИРОВАН!*", parse_mode=ParseMode.MARKDOWN, reply_markup=get_main_menu(user_id))
         return
 
-    # Кнопка «Режим разработчика» в настройках
+    if text == "🔙 НАЗАД":
+        await update.message.reply_text("📋 Главное меню", reply_markup=get_main_menu(user_id))
+        return
+
+    # НАСТРОЙКИ
+    if text == "⚙️ НАСТРОЙКИ":
+        await update.message.reply_text("⚙️ *НАСТРОЙКИ*", parse_mode=ParseMode.MARKDOWN, reply_markup=get_settings_menu())
+        return
+
     if text == "👨‍💻 РЕЖИМ РАЗРАБОТЧИКА":
         if db.is_dev(user_id):
             await update.message.reply_text("✅ *DEV MODE УЖЕ АКТИВЕН!*", parse_mode=ParseMode.MARKDOWN, reply_markup=get_main_menu(user_id))
@@ -281,7 +297,7 @@ async def handle_message(update, context):
         context.user_data['state'] = 'dev_password'
         return
 
-    if state == 'dev_password':
+    if context.user_data.get('state') == 'dev_password':
         if db.get_dev_blocked_until(user_id):
             blocked_until = datetime.strptime(db.get_dev_blocked_until(user_id), '%Y-%m-%d %H:%M:%S')
             if blocked_until > datetime.now():
@@ -306,45 +322,30 @@ async def handle_message(update, context):
             await update.message.reply_text(f"❌ *НЕВЕРНЫЙ ПАРОЛЬ!* (Попытка {attempts}/3)", parse_mode=ParseMode.MARKDOWN)
         return
 
-    if text == "🔙 НАЗАД":
-        context.user_data['state'] = 'main'
-        await update.message.reply_text("📋 Главное меню", reply_markup=get_main_menu(user_id))
-        return
+    # ЛИМИТ ЗАПРОСОВ
+    if text in ["🕵️ DEEP SCAN", "👤 ПОИСК ПО НИКУ", "🌍 ПОИСК ПО IP", "📧 ПОИСК ПО EMAIL", "📱 ПОИСК ПО ТЕЛЕФОНУ"]:
+        if not db.is_vip(user_id) and not db.is_dev(user_id):
+            balance = db.get_requests_balance(user_id)
+            if balance <= 0:
+                await update.message.reply_text("❌ *БАЛАНС ЗАПРОСОВ: 0*\n\nВы использовали все запросы.\nПодпишитесь для продолжения:", parse_mode=ParseMode.MARKDOWN, reply_markup=get_payment_menu())
+                return
+            db.spend_request(user_id)
 
-    # НАСТРОЙКИ
-    if text == "⚙️ НАСТРОЙКИ":
-        await update.message.reply_text("⚙️ *НАСТРОЙКИ*", parse_mode=ParseMode.MARKDOWN, reply_markup=get_settings_menu())
-        return
-
-    # Смена языка
-    if text == "🌐 ЯЗЫК":
-        await update.message.reply_text("📌 *Выберите языки:*", parse_mode=ParseMode.MARKDOWN,
-            reply_markup=InlineKeyboardMarkup([
-                [InlineKeyboardButton("🇷🇺 Русский", callback_data="lang_ru")],
-                [InlineKeyboardButton("🇬🇧 English", callback_data="lang_en")]
-            ])
-        )
-        return
-
-    # Смена темы
-    if text == "🎨 ТЕМА":
-        await update.message.reply_text("🎨 *Выберите тему:*", parse_mode=ParseMode.MARKDOWN,
-            reply_markup=InlineKeyboardMarkup([
-                [InlineKeyboardButton("💀 Hacker", callback_data="theme_hacker")],
-                [InlineKeyboardButton("🔥 Cyberpunk", callback_data="theme_cyberpunk")],
-                [InlineKeyboardButton("🌙 Dark", callback_data="theme_dark")]
-            ])
-        )
-        return
-
-    # Смена режима
-    if text == "📌 СМЕНИТЬ РЕЖИМ":
-        await update.message.reply_text("📌 *Выберите режим:*", parse_mode=ParseMode.MARKDOWN,
-            reply_markup=InlineKeyboardMarkup([
-                [InlineKeyboardButton("🔑 KEY HELPER", callback_data="mode_key_helper")],
-                [InlineKeyboardButton("⚡ FAST HELPER", callback_data="mode_fast_helper")]
-            ])
-        )
+        if text == "🕵️ DEEP SCAN":
+            await update.message.reply_text("Введите никнейм:")
+            context.user_data['state'] = 'deep_scan'
+        elif text == "👤 ПОИСК ПО НИКУ":
+            await update.message.reply_text("Введите никнейм:")
+            context.user_data['state'] = 'nick'
+        elif text == "🌍 ПОИСК ПО IP":
+            await update.message.reply_text("Введите IP-адрес:")
+            context.user_data['state'] = 'ip'
+        elif text == "📧 ПОИСК ПО EMAIL":
+            await update.message.reply_text("Введите email:")
+            context.user_data['state'] = 'email'
+        elif text == "📱 ПОИСК ПО ТЕЛЕФОНУ":
+            await update.message.reply_text("Введите номер телефона:")
+            context.user_data['state'] = 'phone'
         return
 
     # DEV МЕНЮ
@@ -393,8 +394,8 @@ async def handle_message(update, context):
             context.user_data['state'] = 'main'
             return
 
-    # DEV-ФУНКЦИИ
-    if state == 'dev_search':
+    # DEV ФУНКЦИИ
+    if context.user_data.get('state') == 'dev_search':
         users = db.search_users(text)
         if not users:
             await update.message.reply_text("Не найдено", reply_markup=get_dev_menu())
@@ -403,7 +404,7 @@ async def handle_message(update, context):
         await update.message.reply_text(f"🔍 *РЕЗУЛЬТАТЫ:*\n{report}", parse_mode=ParseMode.MARKDOWN, reply_markup=get_dev_menu())
         context.user_data['state'] = 'dev'
         return
-    if state == 'dev_ban':
+    if context.user_data.get('state') == 'dev_ban':
         try:
             db.ban_user(int(text))
             await update.message.reply_text("✅ Забанен!", reply_markup=get_dev_menu())
@@ -411,7 +412,7 @@ async def handle_message(update, context):
             await update.message.reply_text("❌ Неверный ID!", reply_markup=get_dev_menu())
         context.user_data['state'] = 'dev'
         return
-    if state == 'dev_unban':
+    if context.user_data.get('state') == 'dev_unban':
         try:
             db.unban_user(int(text))
             await update.message.reply_text("✅ Разбанен!", reply_markup=get_dev_menu())
@@ -419,7 +420,7 @@ async def handle_message(update, context):
             await update.message.reply_text("❌ Неверный ID!", reply_markup=get_dev_menu())
         context.user_data['state'] = 'dev'
         return
-    if state == 'dev_add_requests':
+    if context.user_data.get('state') == 'dev_add_requests':
         try:
             target_id = int(text)
             await update.message.reply_text("Введите количество запросов:")
@@ -429,7 +430,7 @@ async def handle_message(update, context):
             await update.message.reply_text("❌ Неверный ID!", reply_markup=get_dev_menu())
             context.user_data['state'] = 'dev'
         return
-    if state == 'dev_add_requests_count':
+    if context.user_data.get('state') == 'dev_add_requests_count':
         try:
             count = int(text)
             db.add_requests(context.user_data['target_user'], count)
@@ -438,7 +439,7 @@ async def handle_message(update, context):
             await update.message.reply_text("❌ Неверное число!", reply_markup=get_dev_menu())
         context.user_data['state'] = 'dev'
         return
-    if state == 'dev_vip':
+    if context.user_data.get('state') == 'dev_vip':
         try:
             db.set_vip(int(text), 1, (datetime.now() + timedelta(days=30)).strftime('%Y-%m-%d %H:%M:%S'))
             await update.message.reply_text("✅ VIP выдан на 30 дней!", reply_markup=get_dev_menu())
@@ -447,34 +448,8 @@ async def handle_message(update, context):
         context.user_data['state'] = 'dev'
         return
 
-    # Лимит запросов
-    if text in ["🕵️ DEEP SCAN", "👤 ПОИСК ПО НИКУ", "🌍 ПОИСК ПО IP", "📧 ПОИСК ПО EMAIL", "📱 ПОИСК ПО ТЕЛЕФОНУ"]:
-        if not db.is_vip(user_id) and not db.is_dev(user_id):
-            balance = db.get_requests_balance(user_id)
-            if balance <= 0:
-                await update.message.reply_text("❌ *БАЛАНС ЗАПРОСОВ: 0*\n\nВы использовали все запросы.\nПодпишитесь для продолжения:", parse_mode=ParseMode.MARKDOWN, reply_markup=get_payment_menu())
-                return
-            db.spend_request(user_id)
-
-        if text == "🕵️ DEEP SCAN":
-            await update.message.reply_text("Введите никнейм:")
-            context.user_data['state'] = 'deep_scan'
-        elif text == "👤 ПОИСК ПО НИКУ":
-            await update.message.reply_text("Введите никнейм:")
-            context.user_data['state'] = 'nick'
-        elif text == "🌍 ПОИСК ПО IP":
-            await update.message.reply_text("Введите IP-адрес:")
-            context.user_data['state'] = 'ip'
-        elif text == "📧 ПОИСК ПО EMAIL":
-            await update.message.reply_text("Введите email:")
-            context.user_data['state'] = 'email'
-        elif text == "📱 ПОИСК ПО ТЕЛЕФОНУ":
-            await update.message.reply_text("Введите номер телефона:")
-            context.user_data['state'] = 'phone'
-        return
-
-    # DEEP SCAN
-    if state == 'deep_scan':
+    # OSINT ФУНКЦИИ
+    if context.user_data.get('state') == 'deep_scan':
         target = text.strip().replace("@", "")
         await matrix_rain(update, "SCAN")
         await hacking_animation(update, "CRACK")
@@ -490,8 +465,7 @@ async def handle_message(update, context):
         context.user_data['state'] = 'main'
         return
 
-    # NICK
-    if state == 'nick':
+    if context.user_data.get('state') == 'nick':
         target = text.strip().replace("@", "")
         await hacking_animation(update, "SCAN")
         social_results = osint_engine.check_social(target)
@@ -503,8 +477,7 @@ async def handle_message(update, context):
         context.user_data['state'] = 'main'
         return
 
-    # IP
-    if state == 'ip':
+    if context.user_data.get('state') == 'ip':
         await matrix_rain(update, "IP LOOKUP")
         ip_info = osint_engine.get_geo_ip(text.strip())
         if ip_info:
@@ -518,8 +491,7 @@ async def handle_message(update, context):
         context.user_data['state'] = 'main'
         return
 
-    # EMAIL
-    if state == 'email':
+    if context.user_data.get('state') == 'email':
         await hacking_animation(update, "EMAIL LOOKUP")
         email_info = osint_engine.check_email(text.strip())
         await update.message.reply_text(
@@ -530,8 +502,7 @@ async def handle_message(update, context):
         context.user_data['state'] = 'main'
         return
 
-    # PHONE
-    if state == 'phone':
+    if context.user_data.get('state') == 'phone':
         await port_scan_animation(update, "PHONE LOOKUP")
         await update.message.reply_text(
             f"📱 *ТЕЛЕФОН ИНФО*\n═══════════════════\n\n📱 Номер: {text.strip()}\n\n📌 Telegram: {random.choice(['✅ Есть', '❌ Нет'])}\n📌 WhatsApp: {random.choice(['✅ Есть', '❌ Нет'])}\n📌 Viber: {random.choice(['✅ Есть', '❌ Нет'])}\n\n📋 Риск: {random.randint(10, 95)}%",
@@ -594,10 +565,6 @@ async def handle_callback(update, context):
         db.update_theme(user_id, "cyberpunk")
     elif data == "theme_dark":
         db.update_theme(user_id, "dark")
-    elif data == "mode_key_helper":
-        db.update_mode(user_id, "key_helper")
-    elif data == "mode_fast_helper":
-        db.update_mode(user_id, "fast_helper")
     await query.edit_message_text(
         text=f"✅ *Обновлено!*",
         parse_mode=ParseMode.MARKDOWN
