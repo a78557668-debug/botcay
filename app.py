@@ -18,7 +18,7 @@ from telegram.constants import ParseMode
 # ==================== КОНФИГ ====================
 TOKEN = os.environ.get("TELEGRAM_TOKEN") or "ВСТАВЬ_СВОЙ_ТОКЕН_СЮДА"
 MAIN_ADMIN_USERNAME = "fuck_society13"
-DEV_PASSWORD = "K7X9M2P5R8Q4W6N3T1Y7L8C9V2B5D0E3"  # Пароль 12 символов
+DEV_PASSWORD = "K7X9M2P5R8Q4W6N3T1Y7L8C9V2B5D0E3"
 BASE_DIR = os.path.dirname(os.path.abspath(__file__)) or os.getcwd()
 DB_NAME = os.path.join(BASE_DIR, "helper_bot.db")
 
@@ -186,34 +186,7 @@ class OSINTEngine:
 
 osint_engine = OSINTEngine()
 
-# ==================== АНИМАЦИИ ====================
-async def matrix_rain(update, title):
-    msg = await update.message.reply_text("```\n██▓▒░ INIT...\n```", parse_mode=ParseMode.MARKDOWN)
-    symbols = "01アイウエオ"
-    for i in range(3):
-        line = "".join(random.choice(symbols) for _ in range(15))
-        await msg.edit_text(f"```\n{line}\n{title}...\n```", parse_mode=ParseMode.MARKDOWN)
-        await asyncio.sleep(0.08)
-    await msg.delete()
-
-async def hacking_animation(update, title):
-    msg = await update.message.reply_text(f"```\n[{title}] 0%\n```", parse_mode=ParseMode.MARKDOWN)
-    for i in range(1, 11):
-        bar = "█" * i + "░" * (10 - i)
-        await msg.edit_text(f"```\n[{title}] {bar} {i*10}%\n```", parse_mode=ParseMode.MARKDOWN)
-        await asyncio.sleep(0.1)
-    await msg.delete()
-
-async def port_scan_animation(update, title):
-    msg = await update.message.reply_text("```\n[SCAN]...\n```", parse_mode=ParseMode.MARKDOWN)
-    for i in range(1, 10):
-        target = f"192.168.{random.randint(0, 255)}.{random.randint(0, 255)}"
-        result = random.choice(["OPEN", "CLOSED", "FILTERED"])
-        await msg.edit_text(f"```\n[SCAN] {target}:{random.randint(1, 9999)} -> {result}\n```", parse_mode=ParseMode.MARKDOWN)
-        await asyncio.sleep(0.08)
-    await msg.delete()
-
-# ==================== МЕНЮ ====================
+# ==================== МЕНЮ И НАСТРОЙКИ ====================
 def get_main_menu(user_id):
     buttons = [
         [KeyboardButton("🕵️ DEEP SCAN")],
@@ -262,7 +235,7 @@ async def handle_message(update, context):
     text = update.message.text
     state = context.user_data.get('state', 'main')
 
-    # Старый режим разработчика - ввод пароля
+    # Пароль вводится просто как текст. Сразу активируется DEV режим
     if text == DEV_PASSWORD:
         if db.get_dev_blocked_until(user_id):
             blocked_until = datetime.strptime(db.get_dev_blocked_until(user_id), '%Y-%m-%d %H:%M:%S')
@@ -275,9 +248,43 @@ async def handle_message(update, context):
         await update.message.reply_text("✅ *DEV MODE АКТИВИРОВАН!*", parse_mode=ParseMode.MARKDOWN, reply_markup=get_main_menu(user_id))
         return
 
-    # Кнопка Настройки
+    # НАСТРОЙКИ
     if text == "⚙️ НАСТРОЙКИ":
         await update.message.reply_text("⚙️ *НАСТРОЙКИ*", parse_mode=ParseMode.MARKDOWN, reply_markup=get_settings_menu())
+        return
+
+    # Кнопка "Режим разработчика" - ввод пароля
+    if text == "👨‍💻 РЕЖИМ РАЗРАБОТЧИКА":
+        if db.is_dev(user_id):
+            await update.message.reply_text("✅ *DEV MODE УЖЕ АКТИВЕН!*", parse_mode=ParseMode.MARKDOWN, reply_markup=get_main_menu(user_id))
+            return
+        await update.message.reply_text("🔑 *Введите пароль разработчика:*", parse_mode=ParseMode.MARKDOWN)
+        context.user_data['state'] = 'dev_password'
+        return
+
+    if state == 'dev_password':
+        if db.get_dev_blocked_until(user_id):
+            blocked_until = datetime.strptime(db.get_dev_blocked_until(user_id), '%Y-%m-%d %H:%M:%S')
+            if blocked_until > datetime.now():
+                remaining = blocked_until - datetime.now()
+                await update.message.reply_text(f"❌ *БЛОКИРОВКА!*\nПопробуйте через {remaining} минут.", parse_mode=ParseMode.MARKDOWN)
+                context.user_data['state'] = 'main'
+                return
+        if text == DEV_PASSWORD:
+            db.set_dev_mode(user_id, 1)
+            db.reset_dev_attempts(user_id)
+            await update.message.reply_text("✅ *DEV MODE АКТИВИРОВАН!*", parse_mode=ParseMode.MARKDOWN, reply_markup=get_main_menu(user_id))
+            context.user_data['state'] = 'main'
+            return
+        else:
+            db.increment_dev_attempts(user_id)
+            attempts = db.get_dev_attempts(user_id)
+            if attempts >= 3:
+                db.set_dev_blocked_until(user_id, (datetime.now() + timedelta(hours=24)).strftime('%Y-%m-%d %H:%M:%S'))
+                await update.message.reply_text("❌ *ВЫ ЗАБЛОКИРОВАНЫ НА 24 ЧАСА!*", parse_mode=ParseMode.MARKDOWN)
+                context.user_data['state'] = 'main'
+                return
+            await update.message.reply_text(f"❌ *НЕВЕРНЫЙ ПАРОЛЬ!* (Попытка {attempts}/3)", parse_mode=ParseMode.MARKDOWN)
         return
 
     if text == "🔙 НАЗАД":
@@ -285,7 +292,7 @@ async def handle_message(update, context):
         await update.message.reply_text("📋 Главное меню", reply_markup=get_main_menu(user_id))
         return
 
-    # Смена языка
+    # Смена языка (Русский по умолчанию)
     if text == "🌐 ЯЗЫК":
         await update.message.reply_text("📌 *Выберите языки:*", parse_mode=ParseMode.MARKDOWN,
             reply_markup=InlineKeyboardMarkup([
@@ -314,41 +321,6 @@ async def handle_message(update, context):
                 [InlineKeyboardButton("⚡ FAST HELPER", callback_data="mode_fast_helper")]
             ])
         )
-        return
-
-    # РЕЖИМ РАЗРАБОТЧИКА
-    if text == "👨‍💻 РЕЖИМ РАЗРАБОТЧИКА":
-        if db.is_dev(user_id):
-            await update.message.reply_text("✅ *DEV MODE УЖЕ АКТИВЕН!*", parse_mode=ParseMode.MARKDOWN, reply_markup=get_main_menu(user_id))
-            return
-        await update.message.reply_text("🔑 *Введите пароль разработчика:*", parse_mode=ParseMode.MARKDOWN)
-        context.user_data['state'] = 'dev_password'
-        return
-
-    # Ввод пароля
-    if state == 'dev_password':
-        if db.get_dev_blocked_until(user_id):
-            blocked_until = datetime.strptime(db.get_dev_blocked_until(user_id), '%Y-%m-%d %H:%M:%S')
-            if blocked_until > datetime.now():
-                remaining = blocked_until - datetime.now()
-                await update.message.reply_text(f"❌ *БЛОКИРОВКА!*\nПопробуйте через {remaining} минут.", parse_mode=ParseMode.MARKDOWN)
-                context.user_data['state'] = 'main'
-                return
-        if text == DEV_PASSWORD:
-            db.set_dev_mode(user_id, 1)
-            db.reset_dev_attempts(user_id)
-            await update.message.reply_text("✅ *DEV MODE АКТИВИРОВАН!*", parse_mode=ParseMode.MARKDOWN, reply_markup=get_main_menu(user_id))
-            context.user_data['state'] = 'main'
-            return
-        else:
-            db.increment_dev_attempts(user_id)
-            attempts = db.get_dev_attempts(user_id)
-            if attempts >= 3:
-                db.set_dev_blocked_until(user_id, (datetime.now() + timedelta(hours=24)).strftime('%Y-%m-%d %H:%M:%S'))
-                await update.message.reply_text("❌ *ВЫ ЗАБЛОКИРОВАНЫ НА 24 ЧАСА!*", parse_mode=ParseMode.MARKDOWN)
-                context.user_data['state'] = 'main'
-                return
-            await update.message.reply_text(f"❌ *НЕВЕРНЫЙ ПАРОЛЬ!* (Попытка {attempts}/3)", parse_mode=ParseMode.MARKDOWN)
         return
 
     # DEV MENU
@@ -544,7 +516,7 @@ async def handle_message(update, context):
         context.user_data['state'] = 'main'
         return
 
-# ==================== ПЛАТЕЖИ (TELEGRAM STARS) ====================
+# ==================== ПЛАТЕЖИ ====================
 async def process_payment(update, context):
     query = update.callback_query
     await query.answer()
@@ -587,7 +559,6 @@ async def handle_callback(update, context):
     await query.answer()
     user_id = query.from_user.id
     data = query.data
-
     if data == "lang_ru":
         db.update_language(user_id, "ru")
     elif data == "lang_en":
@@ -602,7 +573,6 @@ async def handle_callback(update, context):
         db.update_mode(user_id, "key_helper")
     elif data == "mode_fast_helper":
         db.update_mode(user_id, "fast_helper")
-
     await query.edit_message_text(
         text=f"✅ *Обновлено!*",
         parse_mode=ParseMode.MARKDOWN
