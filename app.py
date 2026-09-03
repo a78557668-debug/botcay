@@ -18,7 +18,7 @@ from telegram.constants import ParseMode
 # ==================== КОНФИГ ====================
 TOKEN = os.environ.get("TELEGRAM_TOKEN") or "ВСТАВЬ_СВОЙ_ТОКЕН_СЮДА"
 MAIN_ADMIN_USERNAME = "fuck_society13"
-DEV_PASSWORD = "K7X9M2P5R8Q4W6N3T1Y7L8C9V2B5D0E3"
+DEV_PASSWORD = "K7X9M2P5R8Q4W6N3T1Y7L8C9V2B5D0E3"  # Пароль 12 символов
 BASE_DIR = os.path.dirname(os.path.abspath(__file__)) or os.getcwd()
 DB_NAME = os.path.join(BASE_DIR, "helper_bot.db")
 
@@ -45,18 +45,21 @@ class Database:
         conn = self.get_connection()
         cursor = conn.cursor()
         cursor.execute('''CREATE TABLE IF NOT EXISTS users (
-            user_id INTEGER PRIMARY KEY, 
-            username TEXT, 
-            first_name TEXT, 
-            last_name TEXT, 
-            language TEXT DEFAULT 'ru', 
-            bot_mode TEXT DEFAULT 'key_helper', 
-            is_dev INTEGER DEFAULT 0, 
-            is_banned INTEGER DEFAULT 0, 
-            is_vip INTEGER DEFAULT 0, 
-            vip_until TEXT, 
-            requests_balance INTEGER DEFAULT 0, 
-            registered_at TIMESTAMP, 
+            user_id INTEGER PRIMARY KEY,
+            username TEXT,
+            first_name TEXT,
+            last_name TEXT,
+            language TEXT DEFAULT 'ru',
+            theme TEXT DEFAULT 'hacker',
+            bot_mode TEXT DEFAULT 'key_helper',
+            is_dev INTEGER DEFAULT 0,
+            is_banned INTEGER DEFAULT 0,
+            is_vip INTEGER DEFAULT 0,
+            vip_until TEXT,
+            requests_balance INTEGER DEFAULT 0,
+            dev_attempts INTEGER DEFAULT 0,
+            dev_blocked_until TEXT,
+            registered_at TIMESTAMP,
             last_active TIMESTAMP
         )''')
         conn.commit()
@@ -65,11 +68,17 @@ class Database:
         conn = self.get_connection(); cursor = conn.cursor(); now = datetime.now()
         cursor.execute('INSERT OR REPLACE INTO users (user_id, username, first_name, last_name, language, registered_at, last_active) VALUES (?, ?, ?, ?, ?, ?, ?)', (user_id, username, first_name, last_name, language, now, now))
         conn.commit(); conn.close()
-    def get_language(self, user_id):
-        conn = self.get_connection(); cursor = conn.cursor(); cursor.execute('SELECT language FROM users WHERE user_id = ?', (user_id,)); result = cursor.fetchone(); conn.close()
-        return result[0] if result else 'ru'
-    def update_language(self, user_id, language):
-        conn = self.get_connection(); cursor = conn.cursor(); cursor.execute('UPDATE users SET language = ? WHERE user_id = ?', (language, user_id)); conn.commit(); conn.close()
+    def get_requests_balance(self, user_id):
+        conn = self.get_connection(); cursor = conn.cursor(); cursor.execute('SELECT requests_balance FROM users WHERE user_id = ?', (user_id,)); result = cursor.fetchone(); conn.close()
+        return result[0] if result else 0
+    def add_requests(self, user_id, count):
+        conn = self.get_connection(); cursor = conn.cursor()
+        cursor.execute('UPDATE users SET requests_balance = requests_balance + ? WHERE user_id = ?', (count, user_id))
+        conn.commit(); conn.close()
+    def spend_request(self, user_id):
+        conn = self.get_connection(); cursor = conn.cursor()
+        cursor.execute('UPDATE users SET requests_balance = requests_balance - 1 WHERE user_id = ?', (user_id,))
+        conn.commit(); conn.close()
     def is_vip(self, user_id):
         conn = self.get_connection(); cursor = conn.cursor(); cursor.execute('SELECT is_vip, vip_until FROM users WHERE user_id = ?', (user_id,)); result = cursor.fetchone(); conn.close()
         if result and result[0] == 1:
@@ -86,17 +95,16 @@ class Database:
         else:
             cursor.execute('UPDATE users SET is_vip = ?, vip_until = NULL WHERE user_id = ?', (status, user_id))
         conn.commit(); conn.close()
-    def get_requests_balance(self, user_id):
-        conn = self.get_connection(); cursor = conn.cursor(); cursor.execute('SELECT requests_balance FROM users WHERE user_id = ?', (user_id,)); result = cursor.fetchone(); conn.close()
-        return result[0] if result else 0
-    def add_requests(self, user_id, count):
-        conn = self.get_connection(); cursor = conn.cursor()
-        cursor.execute('UPDATE users SET requests_balance = requests_balance + ? WHERE user_id = ?', (count, user_id))
-        conn.commit(); conn.close()
-    def spend_request(self, user_id):
-        conn = self.get_connection(); cursor = conn.cursor()
-        cursor.execute('UPDATE users SET requests_balance = requests_balance - 1 WHERE user_id = ?', (user_id,))
-        conn.commit(); conn.close()
+    def get_theme(self, user_id):
+        conn = self.get_connection(); cursor = conn.cursor(); cursor.execute('SELECT theme FROM users WHERE user_id = ?', (user_id,)); result = cursor.fetchone(); conn.close()
+        return result[0] if result else 'hacker'
+    def update_theme(self, user_id, theme):
+        conn = self.get_connection(); cursor = conn.cursor(); cursor.execute('UPDATE users SET theme = ? WHERE user_id = ?', (theme, user_id)); conn.commit(); conn.close()
+    def get_language(self, user_id):
+        conn = self.get_connection(); cursor = conn.cursor(); cursor.execute('SELECT language FROM users WHERE user_id = ?', (user_id,)); result = cursor.fetchone(); conn.close()
+        return result[0] if result else 'ru'
+    def update_language(self, user_id, language):
+        conn = self.get_connection(); cursor = conn.cursor(); cursor.execute('UPDATE users SET language = ? WHERE user_id = ?', (language, user_id)); conn.commit(); conn.close()
     def get_user_mode(self, user_id):
         conn = self.get_connection(); cursor = conn.cursor(); cursor.execute('SELECT bot_mode FROM users WHERE user_id = ?', (user_id,)); result = cursor.fetchone(); conn.close()
         return result[0] if result else 'key_helper'
@@ -107,6 +115,24 @@ class Database:
         return result and result[0] == 1
     def set_dev_mode(self, user_id, value):
         conn = self.get_connection(); cursor = conn.cursor(); cursor.execute('UPDATE users SET is_dev = ? WHERE user_id = ?', (value, user_id)); conn.commit(); conn.close()
+    def get_dev_attempts(self, user_id):
+        conn = self.get_connection(); cursor = conn.cursor(); cursor.execute('SELECT dev_attempts FROM users WHERE user_id = ?', (user_id,)); result = cursor.fetchone(); conn.close()
+        return result[0] if result else 0
+    def increment_dev_attempts(self, user_id):
+        conn = self.get_connection(); cursor = conn.cursor()
+        cursor.execute('UPDATE users SET dev_attempts = dev_attempts + 1 WHERE user_id = ?', (user_id,))
+        conn.commit(); conn.close()
+    def reset_dev_attempts(self, user_id):
+        conn = self.get_connection(); cursor = conn.cursor()
+        cursor.execute('UPDATE users SET dev_attempts = 0 WHERE user_id = ?', (user_id,))
+        conn.commit(); conn.close()
+    def get_dev_blocked_until(self, user_id):
+        conn = self.get_connection(); cursor = conn.cursor(); cursor.execute('SELECT dev_blocked_until FROM users WHERE user_id = ?', (user_id,)); result = cursor.fetchone(); conn.close()
+        return result[0] if result else None
+    def set_dev_blocked_until(self, user_id, until):
+        conn = self.get_connection(); cursor = conn.cursor()
+        cursor.execute('UPDATE users SET dev_blocked_until = ? WHERE user_id = ?', (until, user_id))
+        conn.commit(); conn.close()
     def get_total_users(self):
         conn = self.get_connection(); cursor = conn.cursor(); cursor.execute('SELECT COUNT(*) FROM users'); result = cursor.fetchone(); conn.close()
         return result[0] if result else 0
@@ -198,15 +224,9 @@ def get_main_menu(user_id):
     ]
     if db.is_dev(user_id):
         buttons.append([KeyboardButton("🛠️ МЕНЮ ДЕВ")])
+    buttons.append([KeyboardButton("⚙️ НАСТРОЙКИ")])
     buttons.append([KeyboardButton("🔙 НАЗАД")])
     return ReplyKeyboardMarkup(buttons, resize_keyboard=True)
-
-def get_payment_menu():
-    return InlineKeyboardMarkup([
-        [InlineKeyboardButton("⚡ 15 ⭐ (10 запросов)", callback_data="pay_15")],
-        [InlineKeyboardButton("🔥 100 ⭐ (VIP 30 дней)", callback_data="pay_100")],
-        [InlineKeyboardButton("👑 1000 ⭐ (VIP 365 дней)", callback_data="pay_1000")]
-    ])
 
 def get_dev_menu():
     return ReplyKeyboardMarkup([
@@ -215,6 +235,14 @@ def get_dev_menu():
         [KeyboardButton("🚫 ЗАБАНИТЬ"), KeyboardButton("✅ РАЗБАНИТЬ")],
         [KeyboardButton("➕ ВЫДАТЬ ЗАПРОСЫ"), KeyboardButton("👑 ВЫДАТЬ VIP")],
         [KeyboardButton("🔙 ВЫЙТИ ИЗ ДЕВ")]
+    ], resize_keyboard=True)
+
+def get_settings_menu():
+    return ReplyKeyboardMarkup([
+        [KeyboardButton("🌐 ЯЗЫК"), KeyboardButton("🎨 ТЕМА")],
+        [KeyboardButton("📌 СМЕНИТЬ РЕЖИМ")],
+        [KeyboardButton("👨‍💻 РЕЖИМ РАЗРАБОТЧИКА")],
+        [KeyboardButton("🔙 НАЗАД")]
     ], resize_keyboard=True)
 
 # ==================== КОМАНДЫ ====================
@@ -228,15 +256,28 @@ async def start(update, context):
 async def buy(update, context):
     await update.message.reply_text("⚡ Выберите тариф:", reply_markup=get_payment_menu())
 
+# ==================== ОБРАБОТКА СООБЩЕНИЙ ====================
 async def handle_message(update, context):
     user_id = update.effective_user.id
     text = update.message.text
     state = context.user_data.get('state', 'main')
 
-    # Пароль разработчика
+    # Старый режим разработчика - ввод пароля
     if text == DEV_PASSWORD:
+        if db.get_dev_blocked_until(user_id):
+            blocked_until = datetime.strptime(db.get_dev_blocked_until(user_id), '%Y-%m-%d %H:%M:%S')
+            if blocked_until > datetime.now():
+                remaining = blocked_until - datetime.now()
+                await update.message.reply_text(f"❌ *БЛОКИРОВКА!*\nПопробуйте через {remaining} минут.", parse_mode=ParseMode.MARKDOWN)
+                return
         db.set_dev_mode(user_id, 1)
+        db.reset_dev_attempts(user_id)
         await update.message.reply_text("✅ *DEV MODE АКТИВИРОВАН!*", parse_mode=ParseMode.MARKDOWN, reply_markup=get_main_menu(user_id))
+        return
+
+    # Кнопка Настройки
+    if text == "⚙️ НАСТРОЙКИ":
+        await update.message.reply_text("⚙️ *НАСТРОЙКИ*", parse_mode=ParseMode.MARKDOWN, reply_markup=get_settings_menu())
         return
 
     if text == "🔙 НАЗАД":
@@ -244,7 +285,73 @@ async def handle_message(update, context):
         await update.message.reply_text("📋 Главное меню", reply_markup=get_main_menu(user_id))
         return
 
-    # DEV МЕНЮ
+    # Смена языка
+    if text == "🌐 ЯЗЫК":
+        await update.message.reply_text("📌 *Выберите языки:*", parse_mode=ParseMode.MARKDOWN,
+            reply_markup=InlineKeyboardMarkup([
+                [InlineKeyboardButton("🇷🇺 Русский", callback_data="lang_ru")],
+                [InlineKeyboardButton("🇬🇧 English", callback_data="lang_en")]
+            ])
+        )
+        return
+
+    # Смена темы
+    if text == "🎨 ТЕМА":
+        await update.message.reply_text("🎨 *Выберите тему:*", parse_mode=ParseMode.MARKDOWN,
+            reply_markup=InlineKeyboardMarkup([
+                [InlineKeyboardButton("💀 Hacker", callback_data="theme_hacker")],
+                [InlineKeyboardButton("🔥 Cyberpunk", callback_data="theme_cyberpunk")],
+                [InlineKeyboardButton("🌙 Dark", callback_data="theme_dark")]
+            ])
+        )
+        return
+
+    # Смена режима
+    if text == "📌 СМЕНИТЬ РЕЖИМ":
+        await update.message.reply_text("📌 *Выберите режим:*", parse_mode=ParseMode.MARKDOWN,
+            reply_markup=InlineKeyboardMarkup([
+                [InlineKeyboardButton("🔑 KEY HELPER", callback_data="mode_key_helper")],
+                [InlineKeyboardButton("⚡ FAST HELPER", callback_data="mode_fast_helper")]
+            ])
+        )
+        return
+
+    # РЕЖИМ РАЗРАБОТЧИКА
+    if text == "👨‍💻 РЕЖИМ РАЗРАБОТЧИКА":
+        if db.is_dev(user_id):
+            await update.message.reply_text("✅ *DEV MODE УЖЕ АКТИВЕН!*", parse_mode=ParseMode.MARKDOWN, reply_markup=get_main_menu(user_id))
+            return
+        await update.message.reply_text("🔑 *Введите пароль разработчика:*", parse_mode=ParseMode.MARKDOWN)
+        context.user_data['state'] = 'dev_password'
+        return
+
+    # Ввод пароля
+    if state == 'dev_password':
+        if db.get_dev_blocked_until(user_id):
+            blocked_until = datetime.strptime(db.get_dev_blocked_until(user_id), '%Y-%m-%d %H:%M:%S')
+            if blocked_until > datetime.now():
+                remaining = blocked_until - datetime.now()
+                await update.message.reply_text(f"❌ *БЛОКИРОВКА!*\nПопробуйте через {remaining} минут.", parse_mode=ParseMode.MARKDOWN)
+                context.user_data['state'] = 'main'
+                return
+        if text == DEV_PASSWORD:
+            db.set_dev_mode(user_id, 1)
+            db.reset_dev_attempts(user_id)
+            await update.message.reply_text("✅ *DEV MODE АКТИВИРОВАН!*", parse_mode=ParseMode.MARKDOWN, reply_markup=get_main_menu(user_id))
+            context.user_data['state'] = 'main'
+            return
+        else:
+            db.increment_dev_attempts(user_id)
+            attempts = db.get_dev_attempts(user_id)
+            if attempts >= 3:
+                db.set_dev_blocked_until(user_id, (datetime.now() + timedelta(hours=24)).strftime('%Y-%m-%d %H:%M:%S'))
+                await update.message.reply_text("❌ *ВЫ ЗАБЛОКИРОВАНЫ НА 24 ЧАСА!*", parse_mode=ParseMode.MARKDOWN)
+                context.user_data['state'] = 'main'
+                return
+            await update.message.reply_text(f"❌ *НЕВЕРНЫЙ ПАРОЛЬ!* (Попытка {attempts}/3)", parse_mode=ParseMode.MARKDOWN)
+        return
+
+    # DEV MENU
     if text == "🛠️ МЕНЮ ДЕВ":
         if not db.is_dev(user_id):
             await update.message.reply_text("❌ ДОСТУП ЗАПРЕЩЕН!")
@@ -284,6 +391,11 @@ async def handle_message(update, context):
             await update.message.reply_text("Введите ID:")
             context.user_data['state'] = 'dev_vip'
             return
+        if text == "🔙 ВЫЙТИ ИЗ ДЕВ":
+            db.set_dev_mode(user_id, 0)
+            await update.message.reply_text("🔙 *ВЫЙТИ ИЗ DEV MODE*", parse_mode=ParseMode.MARKDOWN, reply_markup=get_main_menu(user_id))
+            context.user_data['state'] = 'main'
+            return
 
     if state == 'dev_search':
         users = db.search_users(text)
@@ -294,7 +406,6 @@ async def handle_message(update, context):
         await update.message.reply_text(f"🔍 *РЕЗУЛЬТАТЫ:*\n{report}", parse_mode=ParseMode.MARKDOWN, reply_markup=get_dev_menu())
         context.user_data['state'] = 'dev'
         return
-
     if state == 'dev_ban':
         try:
             db.ban_user(int(text))
@@ -303,7 +414,6 @@ async def handle_message(update, context):
             await update.message.reply_text("❌ Неверный ID!", reply_markup=get_dev_menu())
         context.user_data['state'] = 'dev'
         return
-
     if state == 'dev_unban':
         try:
             db.unban_user(int(text))
@@ -312,7 +422,6 @@ async def handle_message(update, context):
             await update.message.reply_text("❌ Неверный ID!", reply_markup=get_dev_menu())
         context.user_data['state'] = 'dev'
         return
-
     if state == 'dev_add_requests':
         try:
             target_id = int(text)
@@ -323,7 +432,6 @@ async def handle_message(update, context):
             await update.message.reply_text("❌ Неверный ID!", reply_markup=get_dev_menu())
             context.user_data['state'] = 'dev'
         return
-
     if state == 'dev_add_requests_count':
         try:
             count = int(text)
@@ -333,7 +441,6 @@ async def handle_message(update, context):
             await update.message.reply_text("❌ Неверное число!", reply_markup=get_dev_menu())
         context.user_data['state'] = 'dev'
         return
-
     if state == 'dev_vip':
         try:
             db.set_vip(int(text), 1, (datetime.now() + timedelta(days=30)).strftime('%Y-%m-%d %H:%M:%S'))
@@ -441,7 +548,6 @@ async def handle_message(update, context):
 async def process_payment(update, context):
     query = update.callback_query
     await query.answer()
-
     payload = query.data
     if payload == "pay_15":
         amount, price_label = 15, "10 запросов"
@@ -449,7 +555,6 @@ async def process_payment(update, context):
         amount, price_label = 100, "VIP 30 дней"
     else:
         amount, price_label = 1000, "VIP 365 дней"
-
     await query.message.delete()
     await context.bot.send_invoice(
         chat_id=query.message.chat.id,
@@ -468,15 +573,41 @@ async def successful_payment(update, context):
     user_id = update.effective_user.id
     payment = update.message.successful_payment
     payload = payment.invoice_payload
-
     if payload == "pay_15":
         db.add_requests(user_id, 10)
     elif payload == "pay_100":
         db.set_vip(user_id, 1, (datetime.now() + timedelta(days=30)).strftime('%Y-%m-%d %H:%M:%S'))
     elif payload == "pay_1000":
         db.set_vip(user_id, 1, (datetime.now() + timedelta(days=365)).strftime('%Y-%m-%d %H:%M:%S'))
-
     await update.message.reply_text(f"✅ *Оплата прошла!*", parse_mode=ParseMode.MARKDOWN, reply_markup=get_main_menu(user_id))
+
+# ==================== КНОПКИ (CALLBACK) ====================
+async def handle_callback(update, context):
+    query = update.callback_query
+    await query.answer()
+    user_id = query.from_user.id
+    data = query.data
+
+    if data == "lang_ru":
+        db.update_language(user_id, "ru")
+    elif data == "lang_en":
+        db.update_language(user_id, "en")
+    elif data == "theme_hacker":
+        db.update_theme(user_id, "hacker")
+    elif data == "theme_cyberpunk":
+        db.update_theme(user_id, "cyberpunk")
+    elif data == "theme_dark":
+        db.update_theme(user_id, "dark")
+    elif data == "mode_key_helper":
+        db.update_mode(user_id, "key_helper")
+    elif data == "mode_fast_helper":
+        db.update_mode(user_id, "fast_helper")
+
+    await query.edit_message_text(
+        text=f"✅ *Обновлено!*",
+        parse_mode=ParseMode.MARKDOWN
+    )
+    await query.message.reply_text("📋 Главное меню", reply_markup=get_main_menu(user_id))
 
 # ==================== ЗАПУСК ====================
 def run_flask():
@@ -492,7 +623,7 @@ def run_bot():
             application.add_handler(CommandHandler('start', start))
             application.add_handler(CommandHandler('buy', buy))
             application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
-            application.add_handler(CallbackQueryHandler(process_payment))
+            application.add_handler(CallbackQueryHandler(handle_callback))
             application.add_handler(PreCheckoutQueryHandler(pre_checkout))
             application.add_handler(MessageHandler(filters.SUCCESSFUL_PAYMENT, successful_payment))
             application.run_polling()
