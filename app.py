@@ -17,7 +17,6 @@ from telegram.constants import ParseMode
 
 # ==================== КОНФИГ ====================
 TOKEN = os.environ.get("TELEGRAM_TOKEN") or "ВСТАВЬ_СВОЙ_ТОКЕН_СЮДА"
-MAIN_ADMIN_USERNAME = "fuck_society13"
 DEV_PASSWORD = "K7X9M2P5R8Q4W6N3T1Y7L8C9V2B5D0E3"
 BASE_DIR = os.path.dirname(os.path.abspath(__file__)) or os.getcwd()
 DB_NAME = os.path.join(BASE_DIR, "helper_bot.db")
@@ -95,21 +94,6 @@ class Database:
         else:
             cursor.execute('UPDATE users SET is_vip = ?, vip_until = NULL WHERE user_id = ?', (status, user_id))
         conn.commit(); conn.close()
-    def get_theme(self, user_id):
-        conn = self.get_connection(); cursor = conn.cursor(); cursor.execute('SELECT theme FROM users WHERE user_id = ?', (user_id,)); result = cursor.fetchone(); conn.close()
-        return result[0] if result else 'hacker'
-    def update_theme(self, user_id, theme):
-        conn = self.get_connection(); cursor = conn.cursor(); cursor.execute('UPDATE users SET theme = ? WHERE user_id = ?', (theme, user_id)); conn.commit(); conn.close()
-    def get_language(self, user_id):
-        conn = self.get_connection(); cursor = conn.cursor(); cursor.execute('SELECT language FROM users WHERE user_id = ?', (user_id,)); result = cursor.fetchone(); conn.close()
-        return result[0] if result else 'ru'
-    def update_language(self, user_id, language):
-        conn = self.get_connection(); cursor = conn.cursor(); cursor.execute('UPDATE users SET language = ? WHERE user_id = ?', (language, user_id)); conn.commit(); conn.close()
-    def get_user_mode(self, user_id):
-        conn = self.get_connection(); cursor = conn.cursor(); cursor.execute('SELECT bot_mode FROM users WHERE user_id = ?', (user_id,)); result = cursor.fetchone(); conn.close()
-        return result[0] if result else 'key_helper'
-    def update_mode(self, user_id, mode):
-        conn = self.get_connection(); cursor = conn.cursor(); cursor.execute('UPDATE users SET bot_mode = ? WHERE user_id = ?', (mode, user_id)); conn.commit(); conn.close()
     def is_dev(self, user_id):
         conn = self.get_connection(); cursor = conn.cursor(); cursor.execute('SELECT is_dev FROM users WHERE user_id = ?', (user_id,)); result = cursor.fetchone(); conn.close()
         return result and result[0] == 1
@@ -136,6 +120,13 @@ class Database:
     def get_total_users(self):
         conn = self.get_connection(); cursor = conn.cursor(); cursor.execute('SELECT COUNT(*) FROM users'); result = cursor.fetchone(); conn.close()
         return result[0] if result else 0
+    def get_all_users(self):
+        conn = self.get_connection(); cursor = conn.cursor(); cursor.execute('SELECT user_id, username, first_name, last_name, is_banned FROM users ORDER BY registered_at DESC'); results = cursor.fetchall(); conn.close()
+        return results
+    def ban_user(self, user_id):
+        conn = self.get_connection(); cursor = conn.cursor(); cursor.execute('UPDATE users SET is_banned = 1 WHERE user_id = ?', (user_id,)); conn.commit(); conn.close()
+    def unban_user(self, user_id):
+        conn = self.get_connection(); cursor = conn.cursor(); cursor.execute('UPDATE users SET is_banned = 0 WHERE user_id = ?', (user_id,)); conn.commit(); conn.close()
     def search_users(self, query):
         conn = self.get_connection(); cursor = conn.cursor(); pattern = f"%{query}%"; cursor.execute('SELECT user_id, username, first_name, last_name, is_banned FROM users WHERE username LIKE ? OR user_id LIKE ?', (pattern, pattern)); results = cursor.fetchall(); conn.close()
         return results
@@ -186,7 +177,34 @@ class OSINTEngine:
 
 osint_engine = OSINTEngine()
 
-# ==================== МЕНЮ И НАСТРОЙКИ ====================
+# ==================== АНИМАЦИИ ====================
+async def matrix_rain(update, title):
+    msg = await update.message.reply_text("```\n██▓▒░ INIT...\n```", parse_mode=ParseMode.MARKDOWN)
+    symbols = "01アイウエオ"
+    for i in range(3):
+        line = "".join(random.choice(symbols) for _ in range(15))
+        await msg.edit_text(f"```\n{line}\n{title}...\n```", parse_mode=ParseMode.MARKDOWN)
+        await asyncio.sleep(0.08)
+    await msg.delete()
+
+async def hacking_animation(update, title):
+    msg = await update.message.reply_text(f"```\n[{title}] 0%\n```", parse_mode=ParseMode.MARKDOWN)
+    for i in range(1, 11):
+        bar = "█" * i + "░" * (10 - i)
+        await msg.edit_text(f"```\n[{title}] {bar} {i*10}%\n```", parse_mode=ParseMode.MARKDOWN)
+        await asyncio.sleep(0.1)
+    await msg.delete()
+
+async def port_scan_animation(update, title):
+    msg = await update.message.reply_text("```\n[SCAN]...\n```", parse_mode=ParseMode.MARKDOWN)
+    for i in range(1, 10):
+        target = f"192.168.{random.randint(0, 255)}.{random.randint(0, 255)}"
+        result = random.choice(["OPEN", "CLOSED", "FILTERED"])
+        await msg.edit_text(f"```\n[SCAN] {target}:{random.randint(1, 9999)} -> {result}\n```", parse_mode=ParseMode.MARKDOWN)
+        await asyncio.sleep(0.08)
+    await msg.delete()
+
+# ==================== МЕНЮ ====================
 def get_main_menu(user_id):
     buttons = [
         [KeyboardButton("🕵️ DEEP SCAN")],
@@ -218,6 +236,13 @@ def get_settings_menu():
         [KeyboardButton("🔙 НАЗАД")]
     ], resize_keyboard=True)
 
+def get_payment_menu():
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("⚡ 15 ⭐ (10 запросов)", callback_data="pay_15")],
+        [InlineKeyboardButton("🔥 100 ⭐ (VIP 30 дней)", callback_data="pay_100")],
+        [InlineKeyboardButton("👑 1000 ⭐ (VIP 365 дней)", callback_data="pay_1000")]
+    ])
+
 # ==================== КОМАНДЫ ====================
 async def start(update, context):
     user_id = update.effective_user.id
@@ -233,9 +258,8 @@ async def buy(update, context):
 async def handle_message(update, context):
     user_id = update.effective_user.id
     text = update.message.text
-    state = context.user_data.get('state', 'main')
 
-    # Пароль вводится просто как текст. Сразу активируется DEV режим
+    # ВВОД ПАРОЛЯ (1 РАЗ)
     if text == DEV_PASSWORD:
         if db.get_dev_blocked_until(user_id):
             blocked_until = datetime.strptime(db.get_dev_blocked_until(user_id), '%Y-%m-%d %H:%M:%S')
@@ -248,12 +272,7 @@ async def handle_message(update, context):
         await update.message.reply_text("✅ *DEV MODE АКТИВИРОВАН!*", parse_mode=ParseMode.MARKDOWN, reply_markup=get_main_menu(user_id))
         return
 
-    # НАСТРОЙКИ
-    if text == "⚙️ НАСТРОЙКИ":
-        await update.message.reply_text("⚙️ *НАСТРОЙКИ*", parse_mode=ParseMode.MARKDOWN, reply_markup=get_settings_menu())
-        return
-
-    # Кнопка "Режим разработчика" - ввод пароля
+    # Кнопка «Режим разработчика» в настройках
     if text == "👨‍💻 РЕЖИМ РАЗРАБОТЧИКА":
         if db.is_dev(user_id):
             await update.message.reply_text("✅ *DEV MODE УЖЕ АКТИВЕН!*", parse_mode=ParseMode.MARKDOWN, reply_markup=get_main_menu(user_id))
@@ -292,7 +311,12 @@ async def handle_message(update, context):
         await update.message.reply_text("📋 Главное меню", reply_markup=get_main_menu(user_id))
         return
 
-    # Смена языка (Русский по умолчанию)
+    # НАСТРОЙКИ
+    if text == "⚙️ НАСТРОЙКИ":
+        await update.message.reply_text("⚙️ *НАСТРОЙКИ*", parse_mode=ParseMode.MARKDOWN, reply_markup=get_settings_menu())
+        return
+
+    # Смена языка
     if text == "🌐 ЯЗЫК":
         await update.message.reply_text("📌 *Выберите языки:*", parse_mode=ParseMode.MARKDOWN,
             reply_markup=InlineKeyboardMarkup([
@@ -323,7 +347,7 @@ async def handle_message(update, context):
         )
         return
 
-    # DEV MENU
+    # DEV МЕНЮ
     if text == "🛠️ МЕНЮ ДЕВ":
         if not db.is_dev(user_id):
             await update.message.reply_text("❌ ДОСТУП ЗАПРЕЩЕН!")
@@ -331,7 +355,7 @@ async def handle_message(update, context):
         await update.message.reply_text("🛠️ *DEV ПАНЕЛЬ*", parse_mode=ParseMode.MARKDOWN, reply_markup=get_dev_menu())
         return
 
-    if db.is_dev(user_id) and state == 'main':
+    if db.is_dev(user_id):
         if text == "📊 СТАТИСТИКА":
             await update.message.reply_text(f"👥 Всего: {db.get_total_users()}", reply_markup=get_dev_menu())
             return
@@ -369,6 +393,7 @@ async def handle_message(update, context):
             context.user_data['state'] = 'main'
             return
 
+    # DEV-ФУНКЦИИ
     if state == 'dev_search':
         users = db.search_users(text)
         if not users:
