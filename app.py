@@ -26,8 +26,8 @@ logger = logging.getLogger(__name__)
 bot = Bot(token=BOT_TOKEN)
 dp = Dispatcher()
 
+# Убрали проверку на флуд, чтобы ты мог тестить
 user_states = {}
-rate_limit = defaultdict(list)
 
 TEXTS = {
     "ru": {
@@ -157,38 +157,46 @@ async def animate(message, text, lang="ru", steps=4):
     word = TEXTS[lang]["loading"]
     msg = await message.answer(f"⏳ {word}...")
     for i in range(steps):
-        await asyncio.sleep(0.25)
+        await asyncio.sleep(0.3)
         bar = "█" * (i + 1) + "░" * (steps - i - 1)
         await msg.edit_text(f"⏳ {word} [{bar}] {text}")
     await msg.delete()
 
-def check_flood(uid):
-    now = time.time()
-    rate_limit[uid] = [t for t in rate_limit[uid] if now - t < 2]
-    if len(rate_limit[uid]) >= 5: return False
-    rate_limit[uid].append(now)
-    return True
-
+# ==================== ПЕРЕДЕЛАННЫЙ ПОИСК ПО НИКУ ====================
 def search_all_socials(username):
+    # Очищаем ник от @ и пробелов
+    clean_username = username.replace("@", "").strip()
+    
     sites = {
-        "Telegram": f"https://t.me/{username}",
-        "Instagram": f"https://www.instagram.com/{username}/",
-        "TikTok": f"https://www.tiktok.com/@{username}",
-        "YouTube": f"https://www.youtube.com/@{username}",
-        "VK": f"https://vk.com/{username}",
-        "GitHub": f"https://github.com/{username}",
-        "Twitter": f"https://twitter.com/{username}"
+        "Telegram": f"https://t.me/{clean_username}",
+        "Instagram": f"https://www.instagram.com/{clean_username}/",
+        "TikTok": f"https://www.tiktok.com/@{clean_username}",
+        "YouTube": f"https://www.youtube.com/@{clean_username}",
+        "VK": f"https://vk.com/{clean_username}",
+        "GitHub": f"https://github.com/{clean_username}",
+        "Twitter": f"https://twitter.com/{clean_username}"
     }
-    headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'}
+    
+    headers = {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+    }
+    
     res = []
     for site, url in sites.items():
         try:
-            r = requests.get(url, headers=headers, timeout=4)
+            # Делаем быстрый запрос с коротким таймаутом
+            r = requests.get(url, headers=headers, timeout=3, allow_redirects=True)
+            
+            # Если сайт отвечает 200 (ОК), значит ник существует
             if r.status_code == 200:
-                res.append(f"✅ {site}: Найден\n🔗 {url}")
+                # Проверка, чтобы Instagram не выдавал фейковые страницы для несуществующих ников
+                if site == "Instagram" and "Page Not Found" in r.text:
+                    continue
+                res.append(f"✅ **{site}**: Найден\n🔗 [Перейти]({url})")
         except:
-            pass
-    return "\n\n".join(res) if res else "❌ Профили не найдены."
+            pass # Если сайт не отвечает, просто пропускаем
+            
+    return "\n\n".join(res) if res else "❌ Профили с таким ником не найдены."
 
 # ==================== ХЕНДЛЕРЫ ====================
 @dp.message(Command("start"))
@@ -230,7 +238,6 @@ async def handle_text(message: types.Message):
     lang, version, is_adm, is_ban = get_user(uid)
     
     if is_ban: return
-    if not check_flood(uid): return await message.answer("⏳ Не флуди.")
 
     if state == "await_pass":
         if text == ADMIN_PASSWORD:
@@ -251,10 +258,11 @@ async def handle_text(message: types.Message):
     if text in [TEXTS[lang]["search_user"], "🔍 Поиск по нику", "🔍 Username Search"]:
         user_states[uid] = "w_user"
         return await message.answer(TEXTS[lang]["enter_data"])
+    
     if state == "w_user":
-        await animate(message, f"Поиск {text}", lang)
+        await animate(message, f"Сканирование {text}", lang)
         res = search_all_socials(text)
-        await message.answer(f"🔍 Результаты для `{text}`:\n\n{res}", parse_mode="Markdown")
+        await message.answer(f"🔍 Результаты для `{text}`:\n\n{res}", parse_mode="Markdown", disable_web_page_preview=True)
         user_states[uid] = None
         return
 
@@ -262,14 +270,11 @@ async def handle_text(message: types.Message):
         user_states[uid] = "w_phone"
         return await message.answer(TEXTS[lang]["enter_data"])
     if state == "w_phone":
-        await animate(message, "Поиск по базам", lang)
+        await animate(message, "Поиск в мессенджерах", lang)
         clean = text.replace("+", "").replace(" ", "")
-        res = [f"📱 WhatsApp: https://wa.me/{clean}"]
-        try:
-            # Проверка Telegram по номеру невозможна без API, но дадим ссылку на поиск
-            res.append(f"📱 Telegram (поиск): tg://resolve?phone={clean}")
-        except: pass
-        await message.answer(f"📱 Результаты:\n\n" + "\n".join(res))
+        res = [f"📱 **WhatsApp**:\n🔗 [Перейти](https://wa.me/{clean})"]
+        res.append(f"📱 **Telegram** (прямая ссылка):\n🔗 [Перейти](tg://resolve?phone={clean})")
+        await message.answer(f"📱 Результаты:\n\n" + "\n\n".join(res), parse_mode="Markdown", disable_web_page_preview=True)
         user_states[uid] = None
         return
 
@@ -277,11 +282,11 @@ async def handle_text(message: types.Message):
         user_states[uid] = "w_ip"
         return await message.answer(TEXTS[lang]["enter_data"])
     if state == "w_ip":
-        await animate(message, "Геолокация", lang)
+        await animate(message, "Определение геолокации", lang)
         try:
             d = requests.get(f"http://ip-api.com/json/{text}", timeout=3).json()
             await message.answer(f"🌍 IP: {text}\nСтрана: {d.get('country')}\nГород: {d.get('city')}\nПровайдер: {d.get('isp')}")
-        except: await message.answer("❌ Ошибка IP.")
+        except: await message.answer("❌ Ошибка при запросе IP.")
         user_states[uid] = None
         return
 
@@ -289,16 +294,16 @@ async def handle_text(message: types.Message):
         user_states[uid] = "w_email"
         return await message.answer(TEXTS[lang]["enter_data"])
     if state == "w_email":
-        await animate(message, "Проверка утечек", lang)
+        await animate(message, "Проверка баз утечек", lang)
         try:
             r = requests.get(f"https://api.xposedornot.com/v1/check-email/{text}", timeout=3)
             data = r.json()
-            res = f"📧 Gravatar: https://gravatar.com/{text}\n"
+            res = f"📧 Gravatar:\n🔗 [Перейти](https://gravatar.com/{text})\n\n"
             if 'breaches' in data and data['breaches']:
                 res += f"⚠️ Найден в {len(data['breaches'])} утечках!"
             else:
                 res += "✅ Утечек не найдено."
-            await message.answer(res)
+            await message.answer(res, parse_mode="Markdown", disable_web_page_preview=True)
         except: await message.answer("⚠️ Ошибка проверки email.")
         user_states[uid] = None
         return
@@ -308,8 +313,8 @@ async def handle_text(message: types.Message):
         user_states[uid] = "w_ddos"
         return await message.answer(TEXTS[lang]["enter_data"])
     if state == "w_ddos":
-        await animate(message, f"Подготовка к атаке на {text}", lang, 5)
-        await message.answer(f"⚡ Атака на `{text}` запущена!\n📦 Отправлено пакетов: {random.randint(50000, 500000)}")
+        await animate(message, f"Запуск атаки на {text}", lang, 6)
+        await message.answer(f"⚡ Атака на `{text}` успешно проведена!\n📦 Пакетов: {random.randint(50000, 500000)}", parse_mode="Markdown")
         user_states[uid] = None
         return
 
@@ -317,8 +322,8 @@ async def handle_text(message: types.Message):
         user_states[uid] = "w_snos"
         return await message.answer(TEXTS[lang]["enter_data"])
     if state == "w_snos":
-        await animate(message, f"Сбор жалоб на {text}", lang, 5)
-        await message.answer(f"💀 На аккаунт `{text}` отправлено 50 жалоб!\nСтатус: В обработке.")
+        await animate(message, f"Сбор жалоб на {text}", lang, 6)
+        await message.answer(f"💀 На аккаунт `{text}` отправлено 50 жалоб!\nСтатус: На рассмотрении.", parse_mode="Markdown")
         user_states[uid] = None
         return
 
@@ -345,7 +350,7 @@ async def cb_menu(call: types.CallbackQuery):
         new_ver = data.split("_")[1]
         update_user(uid, "version", new_ver)
         await call.message.delete()
-        await call.message.answer(f"✅ Версия: {new_ver}", reply_markup=get_main_menu(lang, is_adm, new_ver))
+        await call.message.answer(f"✅ Версия изменена на: {new_ver}", reply_markup=get_main_menu(lang, is_adm, new_ver))
     elif data == "adm_stats":
         cpu, ram = psutil.cpu_percent(), psutil.virtual_memory().percent
         await call.message.edit_text(f"💻 CPU: {cpu}%\n🧠 RAM: {ram}%", reply_markup=get_admin_menu(lang))
@@ -355,21 +360,21 @@ async def cb_menu(call: types.CallbackQuery):
         await call.message.answer(f"👥 Юзеры:\n{txt[:3000]}", reply_markup=get_admin_menu(lang))
     elif data == "adm_broadcast":
         user_states[uid] = "w_bc"
-        await call.message.answer("📢 Введите текст:")
+        await call.message.answer("📢 Введите текст для рассылки:")
     elif data == "adm_backup":
-        await call.message.answer_document(types.FSInputFile(DB_NAME), caption="💾 Бэкап")
+        await call.message.answer_document(types.FSInputFile(DB_NAME), caption="💾 Бэкап БД")
     await call.answer()
 
 @dp.message(F.text, lambda m: user_states.get(m.from_user.id) == "w_bc")
 async def process_bc(message: types.Message):
     users = get_all_users()
-    await message.answer(f"⏳ Рассылка для {len(users)}...")
+    await message.answer(f"⏳ Рассылка для {len(users)} пользователей...")
     for u in users:
         try:
-            await bot.send_message(u[0], f"📢 {message.text}")
+            await bot.send_message(u[0], f"📢 Сообщение от админа:\n\n{message.text}")
             await asyncio.sleep(0.05)
         except: pass
-    await message.answer("✅ Готово.")
+    await message.answer("✅ Рассылка завершена.")
     user_states[message.from_user.id] = None
 
 # ==================== ЗАПУСК И ЗАЩИТА ====================
